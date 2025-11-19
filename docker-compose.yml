@@ -41,6 +41,7 @@ services:
     volumes:
       - .:/app
       - /app/.venv
+      - uploads:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -48,5 +49,25 @@ services:
         condition: service_healthy
     command: python app.py
 
+  celery_worker:
+    build: .
+    container_name: transcription_celery
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://transcription_user:transcription_pass_dev_123@transcription_db:5432/transcription_db
+      - REDIS_URL=redis://transcription_redis:6379/0
+    volumes:
+      - .:/app
+      - /app/.venv
+      - uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A tasks worker --loglevel=info --concurrency=2
+
 volumes:
   postgres_data:
+  uploads:

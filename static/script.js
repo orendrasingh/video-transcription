@@ -355,8 +355,8 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
     // Show status section
     document.getElementById('statusSection').style.display = 'block';
     document.getElementById('resultSection').style.display = 'none';
-    document.getElementById('statusMessage').textContent = 'Uploading video...';
-    document.getElementById('progressFill').style.width = '30%';
+    document.getElementById('statusMessage').textContent = 'Preparing upload...';
+    document.getElementById('progressFill').style.width = '5%';
     
     try {
         const response = await fetch('/api/transcribe', {
@@ -368,7 +368,9 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
         
         if (response.ok) {
             currentTranscriptionId = data.transcription_id;
-            showNotification('Transcription started!', 'success');
+            document.getElementById('statusMessage').textContent = 'Queued for transcription...';
+            document.getElementById('progressFill').style.width = '10%';
+            showNotification('Video uploaded! Transcription will start shortly.', 'success');
         } else {
             showNotification(data.error || 'Failed to start transcription', 'error');
             document.getElementById('statusSection').style.display = 'none';
@@ -384,29 +386,58 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
 socket.on('status_update', (data) => {
     console.log('Status update:', data);
     
-    if (data.transcription_id === currentTranscriptionId) {
-        document.getElementById('statusMessage').textContent = data.message;
+    // Handle updates for current transcription
+    if (data.id === currentTranscriptionId || data.transcription_id === currentTranscriptionId) {
+        const transcriptionId = data.id || data.transcription_id;
+        const progress = data.progress || 0;
+        const message = data.message || 'Processing...';
+        const status = data.status;
         
-        if (data.status === 'processing') {
-            document.getElementById('progressFill').style.width = '60%';
-        } else if (data.status === 'completed') {
+        // Update progress bar and message
+        document.getElementById('statusMessage').textContent = message;
+        document.getElementById('progressFill').style.width = progress + '%';
+        
+        if (status === 'uploading') {
+            // Upload in progress
+            document.getElementById('progressFill').style.width = '5%';
+        } else if (status === 'queued') {
+            // Queued for processing
+            document.getElementById('progressFill').style.width = '10%';
+        } else if (status === 'processing') {
+            // Processing - use provided progress
+            document.getElementById('progressFill').style.width = progress + '%';
+        } else if (status === 'completed') {
             document.getElementById('progressFill').style.width = '100%';
+            
+            // Fetch the complete transcription
+            fetch(`/api/transcriptions/${transcriptionId}`)
+                .then(response => response.json())
+                .then(result => {
+                    document.getElementById('statusSection').style.display = 'none';
+                    
+                    // Show result with full text
+                    document.getElementById('resultSection').style.display = 'block';
+                    document.getElementById('resultFilename').textContent = result.filename || 'Transcription Result';
+                    document.getElementById('transcriptionText').textContent = result.text || 'No transcription available';
+                    
+                    showNotification('Transcription completed!', 'success');
+                    
+                    // Reset form and allow new uploads
+                    document.getElementById('uploadForm').reset();
+                    currentTranscriptionId = null;
+                })
+                .catch(error => {
+                    console.error('Error fetching transcription:', error);
+                    showNotification('Transcription completed but failed to fetch result', 'error');
+                    document.getElementById('statusSection').style.display = 'none';
+                    currentTranscriptionId = null;
+                });
+        } else if (status === 'failed') {
             document.getElementById('statusSection').style.display = 'none';
-            
-            // Show result
-            document.getElementById('resultSection').style.display = 'block';
-            document.getElementById('resultFilename').textContent = 'Transcription Result';
-            document.getElementById('transcriptionText').textContent = data.text;
-            
-            showNotification('Transcription completed!', 'success');
-            
-            // Reset form
+            showNotification(message || 'Transcription failed', 'error');
+            currentTranscriptionId = null;
+            // Allow new uploads
             document.getElementById('uploadForm').reset();
-            currentTranscriptionId = null;
-        } else if (data.status === 'failed') {
-            document.getElementById('statusSection').style.display = 'none';
-            showNotification(data.message, 'error');
-            currentTranscriptionId = null;
         }
     }
 });
@@ -485,15 +516,22 @@ async function viewTranscription(id) {
         if (await handleAPIError(response)) return;
         const data = await response.json();
         
-        if (response.ok) {
+        if (response.ok && data.text) {
             // Switch to upload tab and show result
-            openTab('upload');
-            document.querySelector('[onclick="openTab(\'upload\')"]').click();
+            const uploadButton = document.querySelector('.tab-button[onclick*="upload"]');
+            if (uploadButton) {
+                uploadButton.click();
+            }
             
             document.getElementById('statusSection').style.display = 'none';
             document.getElementById('resultSection').style.display = 'block';
-            document.getElementById('resultFilename').textContent = data.filename;
+            document.getElementById('resultFilename').textContent = data.filename || 'Transcription';
             document.getElementById('transcriptionText').textContent = data.text;
+            
+            // Scroll to result section
+            document.getElementById('resultSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else if (response.ok && !data.text) {
+            showNotification('Transcription is empty or still processing', 'warning');
         } else {
             showNotification('Failed to load transcription', 'error');
         }

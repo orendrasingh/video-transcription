@@ -39,6 +39,79 @@ class TranscriptionService:
         else:
             raise ValueError(f"Unknown provider: {provider}")
     
+    def transcribe_with_progress(self, audio_path, provider, api_key, progress_callback=None):
+        """Transcribe with progress updates"""
+        if provider == 'gemini':
+            return self._transcribe_gemini_with_progress(audio_path, api_key, progress_callback)
+        elif provider == 'openai':
+            return self._transcribe_openai_with_progress(audio_path, api_key, progress_callback)
+        else:
+            raise ValueError(f"Unknown provider: {provider}")
+    
+    def _transcribe_gemini_with_progress(self, audio_path, api_key, progress_callback=None):
+        """Transcribe using Google Gemini API with progress updates"""
+        try:
+            if progress_callback:
+                progress_callback(0, 'Configuring Gemini API...')
+            
+            genai.configure(api_key=api_key)
+            
+            if progress_callback:
+                progress_callback(20, 'Uploading audio file...')
+            
+            # Upload audio file
+            audio_file = genai.upload_file(audio_path)
+            
+            if progress_callback:
+                progress_callback(50, 'Processing with Gemini AI...')
+            
+            # Use Gemini model
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            
+            prompt = """Please transcribe this audio file with the following requirements:
+
+1. SPEAKER IDENTIFICATION: If multiple speakers are present, identify them as "Speaker 1:", "Speaker 2:", etc. at the start of each speaking turn.
+
+2. FORMATTING:
+   - Each new speaker's dialogue should start on a new line
+   - Use proper punctuation and capitalization
+   - Format as natural conversation flow
+   - Add paragraph breaks for topic changes
+
+3. CONTENT CLEANING:
+   - Remove filler words (um, uh, like, you know, etc.) unless they're essential to meaning
+   - Remove repeated words or false starts
+   - Remove profanity and slurs while maintaining the message
+   - Clean up stuttering and verbal tics
+   - Keep the actual conversation content intact - don't summarize or change meaning
+
+4. OUTPUT FORMAT:
+   If single speaker: Just provide the clean transcript
+   If multiple speakers: Format as:
+   Speaker 1: [their dialogue]
+   Speaker 2: [their dialogue]
+   Speaker 1: [continues...]
+
+Provide only the transcription, no additional commentary."""
+            
+            if progress_callback:
+                progress_callback(80, 'Generating transcription...')
+            
+            response = model.generate_content([prompt, audio_file])
+            
+            if progress_callback:
+                progress_callback(95, 'Cleaning up...')
+            
+            # Delete uploaded file
+            genai.delete_file(audio_file.name)
+            
+            if progress_callback:
+                progress_callback(100, 'Complete!')
+            
+            return response.text
+        except Exception as e:
+            raise Exception(f"Gemini transcription failed: {str(e)}")
+    
     def _transcribe_gemini(self, audio_path, api_key):
         """Transcribe using Google Gemini API with speaker diarization"""
         try:
@@ -84,6 +157,52 @@ Provide only the transcription, no additional commentary."""
             return response.text
         except Exception as e:
             raise Exception(f"Gemini transcription failed: {str(e)}")
+    
+    def _transcribe_openai_with_progress(self, audio_path, api_key, progress_callback=None):
+        """Transcribe using OpenAI Whisper API with progress updates"""
+        try:
+            if progress_callback:
+                progress_callback(0, 'Initializing OpenAI client...')
+            
+            client = OpenAI(api_key=api_key)
+            
+            # Check file size (OpenAI has 25MB limit)
+            file_size = os.path.getsize(audio_path)
+            file_size_mb = file_size / (1024 * 1024)
+            
+            if file_size > 25 * 1024 * 1024:
+                if progress_callback:
+                    progress_callback(10, f'File is {file_size_mb:.1f}MB, splitting into chunks...')
+                # Split audio file if too large
+                raw_transcript = self._transcribe_openai_chunked_with_progress(
+                    audio_path, client, progress_callback
+                )
+            else:
+                if progress_callback:
+                    progress_callback(20, f'Transcribing with Whisper ({file_size_mb:.1f}MB)...')
+                
+                with open(audio_path, 'rb') as audio_file:
+                    raw_transcript = client.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=audio_file,
+                        response_format="text"
+                    )
+                
+                if progress_callback:
+                    progress_callback(70, 'Whisper transcription complete!')
+            
+            # Post-process with GPT for speaker diarization and cleanup
+            if progress_callback:
+                progress_callback(75, 'Enhancing with GPT (speaker detection, cleanup)...')
+            
+            enhanced = self._enhance_transcript_with_gpt(raw_transcript, client)
+            
+            if progress_callback:
+                progress_callback(100, 'Complete!')
+            
+            return enhanced
+        except Exception as e:
+            raise Exception(f"OpenAI transcription failed: {str(e)}")
     
     def _transcribe_openai(self, audio_path, api_key):
         """Transcribe using OpenAI Whisper API with post-processing"""
@@ -148,6 +267,76 @@ Provide ONLY the enhanced transcript, no explanations."""
             # If GPT enhancement fails, return raw transcript
             print(f"GPT enhancement failed: {e}")
             return raw_transcript
+    
+    def _transcribe_openai_chunked_with_progress(self, audio_path, client, progress_callback=None):
+        """Transcribe large audio files in chunks with progress updates"""
+        chunk_duration = 600  # 10 minutes per chunk
+        transcriptions = []
+        
+        # Get audio duration
+        result = subprocess.run([
+            'ffprobe',
+            '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            audio_path
+        ], capture_output=True, text=True)
+        
+        duration = float(result.stdout.strip())
+        duration_min = duration / 60
+        
+        # Split and transcribe chunks
+        temp_dir = tempfile.mkdtemp()
+        try:
+            num_chunks = int(duration / chunk_duration) + 1
+            
+            if progress_callback:
+                progress_callback(15, f'Audio is {duration_min:.1f} minutes, splitting into {num_chunks} chunks...')
+            
+            for i in range(num_chunks):
+                chunk_progress_start = 20 + (i * 50 // num_chunks)
+                
+                if progress_callback:
+                    progress_callback(
+                        chunk_progress_start, 
+                        f'Processing chunk {i+1}/{num_chunks}...'
+                    )
+                
+                start_time = i * chunk_duration
+                chunk_path = os.path.join(temp_dir, f'chunk_{i}.mp3')
+                
+                # Extract chunk
+                subprocess.run([
+                    'ffmpeg',
+                    '-i', audio_path,
+                    '-ss', str(start_time),
+                    '-t', str(chunk_duration),
+                    '-acodec', 'copy',
+                    chunk_path
+                ], check=True, capture_output=True)
+                
+                # Transcribe chunk
+                with open(chunk_path, 'rb') as chunk_file:
+                    transcript = client.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=chunk_file,
+                        response_format="text"
+                    )
+                    transcriptions.append(transcript)
+                
+                if progress_callback:
+                    progress_callback(
+                        chunk_progress_start + (50 // num_chunks), 
+                        f'Chunk {i+1}/{num_chunks} completed!'
+                    )
+                
+                os.remove(chunk_path)
+            
+            return ' '.join(transcriptions)
+        finally:
+            # Cleanup temp directory
+            if os.path.exists(temp_dir):
+                os.rmdir(temp_dir)
     
     def _transcribe_openai_chunked(self, audio_path, client):
         """Transcribe large audio files in chunks"""

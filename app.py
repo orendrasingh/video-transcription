@@ -1,8 +1,5 @@
-from flask import Flask, render_template, request, jsonify, session
-from flask_cors import CORS
-from flask_socketio import SocketIO, emit
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
+from flask import render_template, request, jsonify, session
+from flask_socketio import emit
 import os
 from datetime import datetime, UTC
 import uuid
@@ -13,58 +10,18 @@ from email_validator import validate_email, EmailNotValidError
 from models import db, APIKey, Transcription, User
 from transcription_service import TranscriptionService
 from encryption_service import EncryptionService
-from email_service import EmailService, mail
-import threading
+from email_service import EmailService
+from app_factory import app, socketio, limiter
 
 # Load environment variables
 load_dotenv()
 
-app = Flask(__name__)
-
-# Security Configuration
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', os.urandom(24))
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///transcriptions.db')
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['MAX_CONTENT_LENGTH'] = int(os.getenv('MAX_CONTENT_LENGTH', 524288000))
-
-# Email Configuration
-app.config['MAIL_SERVER'] = os.getenv('MAIL_SERVER')
-app.config['MAIL_PORT'] = int(os.getenv('MAIL_PORT', 587))
-app.config['MAIL_USE_TLS'] = os.getenv('MAIL_USE_TLS', 'True').lower() == 'true'
-app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
-app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
-app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_DEFAULT_SENDER')
-
-# Security Headers
-@app.after_request
-def set_security_headers(response):
-    response.headers['X-Content-Type-Options'] = 'nosniff'
-    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
-    response.headers['X-XSS-Protection'] = '1; mode=block'
-    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
-    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.socket.io; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss:"
-    return response
-
-# Ensure upload folder exists
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-
-db.init_app(app)
-mail.init_app(app)
-CORS(app, supports_credentials=True)
-socketio = SocketIO(app, cors_allowed_origins="*")
-
-# Rate limiting
-limiter = Limiter(
-    app=app,
-    key_func=get_remote_address,
-    default_limits=[f"{os.getenv('RATE_LIMIT_PER_MINUTE', 60)} per minute"],
-    storage_uri=os.getenv('REDIS_URL', 'memory://')
-)
-
 transcription_service = TranscriptionService()
 encryption_service = EncryptionService()
 email_service = EmailService()
+
+# Import tasks module
+import tasks
 
 # Input sanitization helper
 def sanitize_input(text):
@@ -367,10 +324,26 @@ def transcribe():
     # Generate unique ID for this transcription
     transcription_id = str(uuid.uuid4())
     
+    # Emit upload progress
+    socketio.emit('status_update', {
+        'id': transcription_id,
+        'status': 'uploading',
+        'progress': 5,
+        'message': 'Uploading video file...'
+    })
+    
     # Save video file
     filename = f"{transcription_id}_{video.filename}"
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     video.save(filepath)
+    
+    # Emit upload complete
+    socketio.emit('status_update', {
+        'id': transcription_id,
+        'status': 'queued',
+        'progress': 10,
+        'message': 'Upload complete. Queued for processing...'
+    })
     
     # Create transcription record
     transcription = Transcription(
@@ -378,78 +351,25 @@ def transcribe():
         user_id=user_id,
         filename=video.filename,
         provider=provider,
-        status='processing'
+        status='queued'
     )
     db.session.add(transcription)
     db.session.commit()
     
-    # Start transcription in background thread
-    thread = threading.Thread(
-        target=process_transcription,
-        args=(transcription_id, filepath, provider, api_key)
+    # Queue transcription task with Celery
+    # Encrypt API key for task
+    encrypted_key = api_key_record.key_value
+    
+    tasks.process_transcription.apply_async(
+        args=[transcription_id, filepath, provider, encrypted_key],
+        task_id=transcription_id
     )
-    thread.daemon = True
-    thread.start()
     
     return jsonify({
         'transcription_id': transcription_id,
-        'message': 'Transcription started'
+        'message': 'Transcription queued and will start shortly',
+        'status': 'queued'
     })
-
-def process_transcription(transcription_id, filepath, provider, api_key):
-    """Process transcription in background"""
-    with app.app_context():
-        try:
-            # Update status
-            socketio.emit('status_update', {
-                'transcription_id': transcription_id,
-                'status': 'processing',
-                'message': 'Extracting audio from video...'
-            })
-            
-            # Extract audio
-            audio_path = transcription_service.extract_audio(filepath)
-            
-            socketio.emit('status_update', {
-                'transcription_id': transcription_id,
-                'status': 'processing',
-                'message': 'Transcribing audio...'
-            })
-            
-            # Transcribe
-            result = transcription_service.transcribe(audio_path, provider, api_key)
-            
-            # Update database
-            transcription = db.session.get(Transcription, transcription_id)
-            transcription.status = 'completed'
-            transcription.transcription_text = result
-            transcription.completed_at = datetime.now(UTC)
-            db.session.commit()
-            
-            socketio.emit('status_update', {
-                'transcription_id': transcription_id,
-                'status': 'completed',
-                'message': 'Transcription completed!',
-                'text': result
-            })
-            
-            # Cleanup
-            os.remove(filepath)
-            os.remove(audio_path)
-            
-        except Exception as e:
-            # Update status to failed
-            transcription = db.session.get(Transcription, transcription_id)
-            transcription.status = 'failed'
-            transcription.transcription_text = f'Error: {str(e)}'
-            transcription.completed_at = datetime.now(UTC)
-            db.session.commit()
-            
-            socketio.emit('status_update', {
-                'transcription_id': transcription_id,
-                'status': 'failed',
-                'message': f'Transcription failed: {str(e)}'
-            })
 
 @app.route('/api/transcriptions/<transcription_id>', methods=['GET'])
 @login_required
@@ -460,6 +380,18 @@ def get_transcription(transcription_id):
     if not transcription or transcription.user_id != user_id:
         return jsonify({'error': 'Transcription not found'}), 404
     
+    # Check Celery task status if still processing
+    task_info = {}
+    if transcription.status in ['queued', 'processing']:
+        try:
+            task = tasks.celery.AsyncResult(transcription_id)
+            task_info = {
+                'task_state': task.state,
+                'task_info': task.info if task.info else {}
+            }
+        except Exception as e:
+            print(f"Error fetching task status: {e}")
+    
     return jsonify({
         'id': transcription.id,
         'filename': transcription.filename,
@@ -467,7 +399,8 @@ def get_transcription(transcription_id):
         'status': transcription.status,
         'text': transcription.transcription_text,
         'created_at': transcription.created_at.isoformat(),
-        'completed_at': transcription.completed_at.isoformat() if transcription.completed_at else None
+        'completed_at': transcription.completed_at.isoformat() if transcription.completed_at else None,
+        **task_info
     })
 
 @app.route('/api/history', methods=['GET'])
