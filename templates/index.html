@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Transcription App</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+</head>
+<body>
+    <!-- Authentication Section -->
+    <div id="authSection" class="auth-container">
+        <div class="auth-card">
+            <h1>🎬 Video Transcription App</h1>
+            <p class="auth-subtitle">Transcribe videos using AI</p>
+            
+            <div class="auth-tabs">
+                <button class="auth-tab-button active" onclick="switchAuthTab('login')">Login</button>
+                <button class="auth-tab-button" onclick="switchAuthTab('signup')">Sign Up</button>
+            </div>
+            
+            <!-- Login Form -->
+            <form id="loginForm" class="auth-form">
+                <div class="form-group">
+                    <label for="loginEmail">Email</label>
+                    <input type="email" id="loginEmail" placeholder="your@email.com" required>
+                </div>
+                <div class="form-group">
+                    <label for="loginPassword">Password</label>
+                    <input type="password" id="loginPassword" placeholder="Enter your password" required>
+                </div>
+                <button type="submit" class="btn btn-primary">Login</button>
+            </form>
+            
+            <!-- Signup Form -->
+            <form id="signupForm" class="auth-form" style="display: none;">
+                <div class="form-group">
+                    <label for="signupName">Name (Optional)</label>
+                    <input type="text" id="signupName" placeholder="Your name">
+                </div>
+                <div class="form-group">
+                    <label for="signupEmail">Email</label>
+                    <input type="email" id="signupEmail" placeholder="your@email.com" required>
+                </div>
+                <div class="form-group">
+                    <label for="signupPassword">Password</label>
+                    <input type="password" id="signupPassword" placeholder="At least 8 characters" required minlength="8">
+                    <small>Password must be at least 8 characters long</small>
+                </div>
+                <button type="submit" class="btn btn-primary">Create Account</button>
+            </form>
+            
+            <!-- OTP Verification Form -->
+            <form id="otpForm" class="auth-form" style="display: none;">
+                <div class="verification-header">
+                    <h3>📧 Verify Your Email</h3>
+                    <p>We've sent a verification code to your email</p>
+                </div>
+                <div class="form-group">
+                    <label for="otpCode">Enter OTP</label>
+                    <input type="text" id="otpCode" placeholder="Enter 6-digit code" required maxlength="6" pattern="[0-9]{6}">
+                </div>
+                <button type="submit" class="btn btn-primary">Verify Email</button>
+                <button type="button" onclick="resendOTP()" class="btn btn-secondary" style="margin-top: 10px;">Resend OTP</button>
+                <button type="button" onclick="cancelVerification()" class="btn btn-link" style="margin-top: 10px;">Back to Login</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Main App Section -->
+    <div id="appSection" class="container" style="display: none;">
+        <header>
+            <div class="header-content">
+                <div>
+                    <h1>🎬 Video Transcription App</h1>
+                    <p class="subtitle">Transcribe videos using Gemini or OpenAI</p>
+                </div>
+                <div class="user-menu">
+                    <span id="userEmail" class="user-email"></span>
+                    <button onclick="handleLogout()" class="btn btn-secondary">Logout</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Tab Navigation -->
+        <div class="tabs">
+            <button class="tab-button active" onclick="openTab('upload')">📤 Upload</button>
+            <button class="tab-button" onclick="openTab('keys')">🔑 API Keys</button>
+            <button class="tab-button" onclick="openTab('history')">📜 History</button>
+        </div>
+
+        <!-- Upload Tab -->
+        <div id="upload" class="tab-content active">
+            <div class="upload-section">
+                <h2>Upload Video</h2>
+                <form id="uploadForm" enctype="multipart/form-data">
+                    <div class="form-group">
+                        <label for="videoFile">Select Video File:</label>
+                        <input type="file" id="videoFile" name="video" accept="video/*" required>
+                        <small>Supported formats: MP4, AVI, MOV, etc. (Max 500MB)</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="provider">Transcription Provider:</label>
+                        <select id="provider" name="provider" required>
+                            <option value="gemini">Google Gemini</option>
+                            <option value="openai">OpenAI Whisper</option>
+                        </select>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary">Start Transcription</button>
+                </form>
+
+                <!-- Status Display -->
+                <div id="statusSection" class="status-section" style="display: none;">
+                    <h3>Transcription Status</h3>
+                    <div class="status-card">
+                        <div class="status-indicator">
+                            <div class="spinner"></div>
+                            <span id="statusMessage">Processing...</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div id="progressFill" class="progress-fill"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Result Display -->
+                <div id="resultSection" class="result-section" style="display: none;">
+                    <h3>Transcription Result</h3>
+                    <div class="result-card">
+                        <div class="result-header">
+                            <span id="resultFilename"></span>
+                            <button onclick="copyTranscription()" class="btn btn-secondary">📋 Copy</button>
+                        </div>
+                        <div id="transcriptionText" class="transcription-text"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- API Keys Tab -->
+        <div id="keys" class="tab-content">
+            <div class="keys-section">
+                <h2>Manage API Keys</h2>
+                
+                <div class="key-form">
+                    <h3>Add/Update API Key</h3>
+                    <form id="keyForm">
+                        <div class="form-group">
+                            <label for="keyProvider">Provider:</label>
+                            <select id="keyProvider" required>
+                                <option value="gemini">Google Gemini</option>
+                                <option value="openai">OpenAI</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="keyValue">API Key:</label>
+                            <input type="password" id="keyValue" placeholder="Enter your API key" required>
+                            <small>Your API key is stored locally and never shared</small>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary">Save Key</button>
+                    </form>
+                </div>
+
+                <div class="saved-keys">
+                    <h3>Saved Keys</h3>
+                    <div id="keysList" class="keys-list">
+                        <!-- Keys will be loaded here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- History Tab -->
+        <div id="history" class="tab-content">
+            <div class="history-section">
+                <h2>Transcription History</h2>
+                <div id="historyList" class="history-list">
+                    <!-- History items will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
