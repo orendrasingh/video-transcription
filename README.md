@@ -1,191 +1,390 @@
 # Video Transcription Web App
 
-A modern web application for transcribing videos using Google Gemini or OpenAI Whisper APIs.
+A production-ready web application for transcribing videos using AI-powered speech recognition with Google Gemini or OpenAI Whisper APIs.
 
 ## Features
 
-- 👤 **User Authentication**: Secure signup/login system with session management
-- 🔐 **Multi-User Support**: Each user has their own API keys and transcription history
-- 🎬 **Video Upload & Transcription**: Upload videos in various formats (MP4, AVI, MOV, etc.)
-- 🔑 **API Key Management**: Securely store and manage your Gemini and OpenAI API keys
-- ⚡ **Real-time Status Updates**: Track transcription progress with live WebSocket updates
-- 📜 **Transcription History**: View and manage all your past transcriptions
-- 🎨 **Modern UI**: Beautiful, responsive dark-themed interface
-- 💾 **Local Storage**: SQLite database for storing user accounts, API keys, and transcription history
+- 👤 **User Authentication**: Secure signup/login with email OTP verification
+- 🔐 **Multi-User Support**: Isolated user data with encrypted API key storage
+- 🎬 **Video Upload & Transcription**: Support for multiple formats (MP4, AVI, MOV, etc.)
+- 🗣️ **Speaker Diarization**: AI-powered speaker detection and labeling
+- ✨ **Content Enhancement**: Automatic filler word removal and profanity filtering
+- 🔑 **Encrypted API Keys**: Fernet encryption for secure API key storage
+- 📧 **Email Verification**: OTP-based email verification system
+- ⚡ **Real-time Updates**: WebSocket-based live transcription progress
+- 📜 **Transcription History**: Complete history with search and management
+- 🛡️ **Security Features**: Rate limiting, XSS protection, CSRF prevention
+- 🐳 **Docker Ready**: Complete containerization with Docker Compose
+- 💾 **PostgreSQL Database**: Production-grade database with Redis caching
 
 ## Prerequisites
 
-- Python 3.8 or higher
-- FFmpeg (for audio extraction from videos)
+### For Docker Deployment (Recommended)
+- Docker & Docker Compose
+- Git
 
-### Install FFmpeg
+### For Local Development
+- Python 3.13 or higher
+- PostgreSQL 15+
+- Redis 7+
+- FFmpeg (for audio extraction)
+
+## Quick Start with Docker 🐳
+
+The easiest way to run the application is using Docker Compose:
+
+1. **Clone the repository:**
+```bash
+git clone git@github.com:orendrasingh/video-transcription.git
+cd video-transcription
+```
+
+2. **Configure environment variables:**
+```bash
+cp .env.example .env
+# Edit .env with your settings (SMTP credentials, secret key, etc.)
+```
+
+3. **Start all services:**
+```bash
+docker-compose up --build
+```
+
+4. **Access the application:**
+```
+http://localhost:5001
+```
+
+That's it! PostgreSQL, Redis, and the Flask app are all running in containers.
+
+### Docker Commands
+
+```bash
+# Start services in background
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop services
+docker-compose down
+
+# Rebuild after code changes
+docker-compose up --build
+
+# View running containers
+docker-compose ps
+```
+
+## Local Development Setup
+
+### 1. Install Dependencies
 
 **macOS:**
 ```bash
-brew install ffmpeg
+brew install ffmpeg postgresql redis
 ```
 
 **Ubuntu/Debian:**
 ```bash
 sudo apt update
-sudo apt install ffmpeg
+sudo apt install ffmpeg postgresql redis-server libpq-dev
 ```
 
-**Windows:**
-Download from [ffmpeg.org](https://ffmpeg.org/download.html) and add to PATH.
+### 2. Setup Database
 
-## Installation
-
-1. **Clone or download this repository**
-
-2. **Create a virtual environment:**
 ```bash
+# Start PostgreSQL
+sudo systemctl start postgresql  # Linux
+brew services start postgresql   # macOS
+
+# Create database and user
+psql postgres
+CREATE DATABASE transcription_db;
+CREATE USER transcription_user WITH PASSWORD 'your_password';
+GRANT ALL PRIVILEGES ON DATABASE transcription_db TO transcription_user;
+\q
+```
+
+### 3. Setup Redis
+
+```bash
+# Start Redis
+sudo systemctl start redis  # Linux
+brew services start redis   # macOS
+```
+
+### 4. Python Environment
+
+```bash
+# Create virtual environment
 python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-```
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
-3. **Install dependencies:**
-```bash
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-## Configuration
+### 5. Configure Environment
 
-1. **Get API Keys:**
-   - **Google Gemini**: Get your API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
-   - **OpenAI**: Get your API key from [OpenAI Platform](https://platform.openai.com/api-keys)
+```bash
+cp .env.example .env
+# Edit .env with your database credentials and SMTP settings
+```
 
-2. **Add API keys through the web interface** (recommended) or directly in the app
+### 6. Run Application
 
-## Usage
-
-1. **Start the application:**
 ```bash
 python app.py
 ```
 
-Or with Flask CLI:
+Open browser to `http://localhost:5001`
+
+## Configuration
+
+### Required Environment Variables
+
+Create a `.env` file with the following:
+
 ```bash
-FLASK_APP=app.py flask run --port 5001
+# Database
+DATABASE_URL=postgresql://user:password@localhost:5432/transcription_db
+
+# Redis
+REDIS_URL=redis://localhost:6379/0
+
+# Flask
+SECRET_KEY=your-secret-key-here
+FLASK_ENV=development
+
+# Email (SMTP)
+MAIL_SERVER=smtp.gmail.com
+MAIL_PORT=587
+MAIL_USE_TLS=True
+MAIL_USERNAME=your-email@gmail.com
+MAIL_PASSWORD=your-app-password
+
+# Encryption (generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+ENCRYPTION_KEY=your-fernet-key-here
 ```
 
-2. **Open your browser and navigate to:**
-```
-http://localhost:5001
-```
+### Get API Keys
 
-3. **Create an Account:**
-   - Click "Sign Up" on the login page
-   - Enter your email and create a password
-   - Optionally add your name
-   - Click "Create Account"
+Users add their own API keys through the web interface:
+- **Google Gemini**: [Google AI Studio](https://makersuite.google.com/app/apikey)
+- **OpenAI**: [OpenAI Platform](https://platform.openai.com/api-keys)
 
-4. **Setup API Keys:**
-   - Go to the "🔑 API Keys" tab
+## Usage Guide
+
+1. **Sign Up:**
+   - Enter email, password, and name
+   - Verify email with OTP sent to your inbox
+   - Login with verified credentials
+
+2. **Add API Keys:**
+   - Navigate to "🔑 API Keys" tab
    - Add your Gemini and/or OpenAI API keys
-   - Keys are stored securely per user
+   - Keys are encrypted and stored securely
 
-5. **Transcribe Videos:**
+3. **Transcribe Videos:**
    - Go to "📤 Upload" tab
-   - Select your video file
-   - Choose transcription provider (Gemini or OpenAI)
+   - Select video file (supports MP4, AVI, MOV, MKV, etc.)
+   - Choose AI provider (Gemini or OpenAI)
    - Click "Start Transcription"
-   - Watch real-time progress updates
-   - View and copy your transcription
+   - Monitor real-time progress
+   - Get enhanced transcription with:
+     - Speaker labels (Speaker 1, Speaker 2, etc.)
+     - Clean formatting with natural conversation flow
+     - Filler words removed
+     - Profanity filtered
 
-6. **View History:**
-   - Go to "📜 History" tab
-   - See all your past transcriptions
-   - View full transcriptions
+4. **Manage History:**
+   - View all transcriptions in "📜 History" tab
+   - Search and filter results
+   - Copy or download transcriptions
    - Delete old entries
+
+## Technology Stack
+
+- **Backend**: Flask 3.0, Flask-SocketIO, Flask-SQLAlchemy
+- **Database**: PostgreSQL 15 with encrypted storage
+- **Cache/Sessions**: Redis 7
+- **AI APIs**: Google Gemini 1.5 Flash, OpenAI Whisper + GPT-4o-mini
+- **Security**: Flask-Limiter, Fernet encryption, Bleach XSS protection
+- **Email**: Flask-Mail with SMTP
+- **Containerization**: Docker & Docker Compose
+- **Video Processing**: FFmpeg
 
 ## API Endpoints
 
 ### Authentication
-- `POST /api/auth/signup` - Create a new user account
-- `POST /api/auth/login` - Login with email and password
-- `POST /api/auth/logout` - Logout current user
-- `GET /api/auth/user` - Get current logged-in user
+- `POST /api/auth/signup` - Create user account
+- `POST /api/auth/verify-otp` - Verify email with OTP
+- `POST /api/auth/login` - Login with credentials
+- `POST /api/auth/logout` - Logout current session
+- `GET /api/auth/user` - Get current user info
 
-### API Keys (requires authentication)
-- `GET /api/keys` - List all saved API keys
-- `POST /api/keys` - Add/update an API key
-- `DELETE /api/keys?provider={provider}` - Delete an API key
+### API Keys (authenticated)
+- `GET /api/keys` - List encrypted API keys
+- `POST /api/keys` - Add/update API key
+- `DELETE /api/keys?provider={provider}` - Delete API key
 
-### Transcriptions (requires authentication)
-- `POST /api/transcribe` - Start video transcription
-- `GET /api/transcriptions/{id}` - Get specific transcription
-- `GET /api/history` - Get user's transcription history
-- `DELETE /api/history/{id}` - Delete a transcription
+### Transcriptions (authenticated)
+- `POST /api/transcribe` - Start transcription job
+- `GET /api/transcriptions/{id}` - Get transcription details
+- `GET /api/history` - Get user's history
+- `DELETE /api/history/{id}` - Delete transcription
 
 ### WebSocket Events
-- `status_update` - Real-time transcription status updates
+- `status_update` - Real-time progress updates
 
 ## Project Structure
 
 ```
-video transcription/
-├── app.py                    # Main Flask application
-├── models.py                 # Database models
-├── transcription_service.py  # Transcription logic
-├── requirements.txt          # Python dependencies
+video-transcription/
+├── app.py                      # Main Flask application
+├── models.py                   # SQLAlchemy database models
+├── transcription_service.py    # AI transcription logic
+├── email_service.py            # OTP email service
+├── encryption_service.py       # API key encryption
+├── requirements.txt            # Python dependencies
+├── Dockerfile                  # Docker image definition
+├── docker-compose.yml          # Multi-container orchestration
+├── .env.example               # Environment template
+├── .gitignore                 # Git ignore rules
 ├── templates/
-│   └── index.html           # Main HTML template
+│   └── index.html             # Single-page application
 ├── static/
-│   ├── style.css            # Styles
-│   └── script.js            # Frontend JavaScript
-└── uploads/                 # Temporary video storage
+│   ├── style.css              # Dark theme styles
+│   └── script.js              # Frontend logic
+└── uploads/                   # Temporary video storage
 ```
 
 ## Features in Detail
 
-### Supported Video Formats
-- MP4, AVI, MOV, MKV, WMV, FLV, WebM
-- Maximum file size: 500MB
+### AI-Enhanced Transcription
+- **Speaker Diarization**: Automatically detects and labels different speakers
+- **Content Filtering**: Removes filler words (um, uh, like) and profanity
+- **Natural Flow**: Formats transcriptions with proper paragraphs and punctuation
+- **Multi-Provider**: Choose between Gemini (fast, cost-effective) or OpenAI (highly accurate)
 
-### Transcription Providers
+### Supported Formats
+- **Video**: MP4, AVI, MOV, MKV, WMV, FLV, WebM
+- **Maximum Size**: 500MB per file
+- **Languages**: 99+ languages supported
 
-**Google Gemini:**
-- Uses Gemini 1.5 Flash model
-- Supports longer audio files
-- Good for various languages
-
-**OpenAI Whisper:**
-- High accuracy transcription
-- Automatic chunking for large files
-- Supports 99+ languages
-
-### Security
-- Password hashing using Werkzeug's security functions
-- Session-based authentication
-- User data isolation - each user can only access their own data
-- API keys stored securely in SQLite database per user
-- Keys never sent to external servers except provider APIs
-- Temporary files cleaned up after processing
+### Security Features
+- **Email Verification**: OTP-based email verification for new accounts
+- **Encrypted Storage**: Fernet encryption for API keys at rest
+- **Password Hashing**: Werkzeug security for password storage
+- **Rate Limiting**: Redis-backed rate limiting on all endpoints
+- **XSS Protection**: Bleach sanitization for user inputs
+- **CSRF Protection**: Built-in Flask CSRF protection
+- **Session Security**: Secure cookie-based sessions
+- **Data Isolation**: Users can only access their own data
 
 ## Troubleshooting
 
-### FFmpeg not found
-Make sure FFmpeg is installed and available in your PATH:
+### Docker Issues
+
+**Port conflicts:**
 ```bash
-ffmpeg -version
+# Check if ports are in use
+lsof -i :5001  # App
+lsof -i :5432  # PostgreSQL
+lsof -i :6379  # Redis
+
+# Change ports in docker-compose.yml if needed
 ```
 
-### Port already in use
-Change the port in `app.py` or when running:
+**Database connection errors:**
 ```bash
-python app.py  # Edit app.py to change port
+# Restart services
+docker-compose down
+docker-compose up --build
 ```
 
-### API Key errors
-- Verify your API keys are valid
-- Check your API quota/credits
+**View container logs:**
+```bash
+docker-compose logs app
+docker-compose logs postgres
+docker-compose logs redis
+```
+
+### Local Development Issues
+
+**FFmpeg not found:**
+```bash
+ffmpeg -version  # Verify installation
+```
+
+**Database connection failed:**
+```bash
+# Check PostgreSQL is running
+sudo systemctl status postgresql  # Linux
+brew services list                # macOS
+
+# Verify credentials in .env match database
+```
+
+**Email OTP not sending:**
+- Check SMTP credentials in `.env`
+- For Gmail, use App Password (not regular password)
+- Verify `MAIL_USE_TLS=True` for port 587
+
+**API Key errors:**
+- Verify API keys are valid and have credits
+- Check provider status pages
 - Ensure proper API permissions
+
+### Common Errors
+
+**ModuleNotFoundError:**
+```bash
+pip install -r requirements.txt
+```
+
+**Permission denied:**
+```bash
+chmod +x uploads/  # Ensure uploads directory is writable
+```
+
+## Production Deployment
+
+### Using Docker in Production
+
+1. **Update environment variables:**
+   - Set `FLASK_ENV=production`
+   - Use strong `SECRET_KEY` and `ENCRYPTION_KEY`
+   - Configure production SMTP server
+
+2. **Use production WSGI server:**
+   - Replace development server with Gunicorn
+   - Add to `requirements.txt`: `gunicorn`
+   - Update Dockerfile CMD: `gunicorn -k gevent -w 1 app:app`
+
+3. **Enable HTTPS:**
+   - Use nginx reverse proxy
+   - Configure SSL certificates (Let's Encrypt)
+
+4. **Backups:**
+   - Regular PostgreSQL backups
+   - Volume backup for uploads (if persisted)
 
 ## Contributing
 
-Feel free to open issues or submit pull requests for improvements!
+Contributions are welcome! Please:
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
 
 ## License
 
-MIT License - feel free to use this project for personal or commercial purposes.
+MIT License - free to use for personal or commercial projects.
+
+## Support
+
+For issues or questions:
+- Open an issue on GitHub
+- Check existing issues for solutions
