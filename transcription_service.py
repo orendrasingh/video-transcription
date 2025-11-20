@@ -57,15 +57,16 @@ class TranscriptionService:
             genai.configure(api_key=api_key)
             
             if progress_callback:
-                progress_callback(20, 'Uploading audio file...')
+                progress_callback(20, 'Reading audio file...')
             
-            # Upload audio file
-            audio_file = genai.upload_file(audio_path)
+            # Read audio file as bytes
+            with open(audio_path, 'rb') as f:
+                audio_data = f.read()
             
             if progress_callback:
-                progress_callback(50, 'Processing with Gemini AI...')
+                progress_callback(40, 'Processing with Gemini AI...')
             
-            # Use Gemini model
+            # Use Gemini model with file data
             model = genai.GenerativeModel('gemini-1.5-flash')
             
             prompt = """Please transcribe this audio file with the following requirements:
@@ -95,15 +96,15 @@ class TranscriptionService:
 Provide only the transcription, no additional commentary."""
             
             if progress_callback:
-                progress_callback(80, 'Generating transcription...')
+                progress_callback(60, 'Generating transcription...')
             
-            response = model.generate_content([prompt, audio_file])
+            # Create file part for the model
+            file_part = {
+                'mime_type': 'audio/mpeg',
+                'data': audio_data
+            }
             
-            if progress_callback:
-                progress_callback(95, 'Cleaning up...')
-            
-            # Delete uploaded file
-            genai.delete_file(audio_file.name)
+            response = model.generate_content([prompt, file_part])
             
             if progress_callback:
                 progress_callback(100, 'Complete!')
@@ -117,8 +118,9 @@ Provide only the transcription, no additional commentary."""
         try:
             genai.configure(api_key=api_key)
             
-            # Upload audio file
-            audio_file = genai.upload_file(audio_path)
+            # Read audio file as bytes
+            with open(audio_path, 'rb') as f:
+                audio_data = f.read()
             
             # Use Gemini model
             model = genai.GenerativeModel('gemini-1.5-flash')
@@ -149,10 +151,13 @@ Provide only the transcription, no additional commentary."""
 
 Provide only the transcription, no additional commentary."""
             
-            response = model.generate_content([prompt, audio_file])
+            # Create file part for the model
+            file_part = {
+                'mime_type': 'audio/mpeg',
+                'data': audio_data
+            }
             
-            # Delete uploaded file
-            genai.delete_file(audio_file.name)
+            response = model.generate_content([prompt, file_part])
             
             return response.text
         except Exception as e:
